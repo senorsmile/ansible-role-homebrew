@@ -8,19 +8,19 @@
 - name: Ensure Homebrew parent directory has correct permissions (MacOS >= 10.13).
   file:
     path: "{{ homebrew_prefix }}"
-    owner: root
+    owner: "{% if homebrew_noroot is true %}{{ homebrew_user }}{% else %}root{% endif %}"
     state: directory
-  become: true
+  become: "{% if homebrew_noroot is true %}false{% else %}true{% endif %}"
   when: "ansible_distribution_version is version('10.13', '>=')"
 
 - name: Ensure Homebrew parent directory has correct permissions (MacOS < 10.13).
   file:
     path: "{{ homebrew_prefix }}"
-    owner: root
-    group: admin
+    owner: "{% if homebrew_noroot is true %}{{ homebrew_user }}{% else %}root{% endif %}"
+    group: "{% if homebrew_noroot is true %}{{ homebrew_group }}{% else %}admin{% endif %}"
     state: directory
     mode: 0775
-  become: true
+  become: "{% if homebrew_noroot is true %}false{% else %}true{% endif %}"
   when: "ansible_distribution_version is version('10.13', '<')"
 
 - name: Ensure Homebrew directory exists.
@@ -30,7 +30,7 @@
     group: "{{ homebrew_group }}"
     state: directory
     mode: 0775
-  become: true
+  become: "{% if homebrew_noroot is true %}false{% else %}true{% endif %}"
 
 # Clone Homebrew.
 - name: Ensure Homebrew is installed.
@@ -40,8 +40,8 @@
     dest: "{{ homebrew_install_path }}"
     update: false
     depth: 1
-  become: true
-  become_user: "{{ homebrew_user }}"
+  become:      "{% if homebrew_noroot is true %}false{% else %}true{% endif %}"
+  become_user: "{% if homebrew_noroot is true %}omit{% else %}{{ homebrew_user }}{% endif %}"
 
 # Adjust Homebrew permissions.
 - name: Ensure proper permissions and ownership on homebrew_brew_bin_path dirs.
@@ -51,7 +51,7 @@
     owner: "{{ homebrew_user }}"
     group: "{{ homebrew_group }}"
     mode: 0775
-  become: true
+  become: "{% if homebrew_noroot is true %}false{% else %}true{% endif %}"
 
 - name: Ensure proper ownership on homebrew_install_path subdirs.
   file:
@@ -59,7 +59,7 @@
     state: directory
     owner: "{{ homebrew_user }}"
     group: "{{ homebrew_group }}"
-  become: true
+  become: "{% if homebrew_noroot is true %}false{% else %}true{% endif %}"
 
 # Place brew binary in proper location and complete setup.
 - name: Check if homebrew binary is already in place.
@@ -72,8 +72,8 @@
     src: "{{ homebrew_install_path }}/bin/brew"
     dest: "{{ homebrew_brew_bin_path }}/brew"
     state: link
+  become: "{% if homebrew_noroot is true %}false{% else %}true{% endif %}"
   when: not homebrew_binary.stat.exists
-  become: true
 
 - name: Ensure proper homebrew folders are in place.
   file:
@@ -81,8 +81,27 @@
     state: directory
     owner: "{{ homebrew_user }}"
     group: "{{ homebrew_group }}"
-  become: true
+  become: "{% if homebrew_noroot is true %}false{% else %}true{% endif %}"
   loop: "{{ homebrew_folders_base + homebrew_folders_additional }}"
+
+- name: Check if zshrc exists (when noroot is true)
+  stat:
+    path: "{{ ansible_env.HOME }}/.zshrc"
+  register: zshrc
+  when: homebrew_noroot is true
+
+- name: Create zshrc (when noroot is true)
+  file:
+    path: "{{ ansible_env.HOME }}/.zshrc"
+    state: touch
+  when: not zshrc.stat.exists
+
+- name: Ensure homebrew/bin in path (when noroot is true)
+  lineinfile:
+    path: "{{ ansible_env.HOME }}/.zshrc"
+    line: 'export PATH="$PATH:{{ homebrew_brew_bin_path }}"'
+    state: present
+  when: homebrew_noroot is true
 
 - block:
     - name: Force update brew after installation.
@@ -103,6 +122,9 @@
         state: present
       loop: "{{ homebrew_taps }}"
 
+
+    ## brew cask not working in newest version
+    ## fix in homebrew_cask module: https://github.com/ansible-collections/community.general/issues/1524#issuecomment-755126741
     # Cask.
     - name: Ensure blacklisted cask applications are not installed.
       homebrew_cask: "name={{ item }} state=absent"
@@ -152,3 +174,5 @@
   # the `homebrew_user` doesn't match the `ansible_user_id`
   become: "{{ (homebrew_user != ansible_user_id) | bool }}"
   become_user: "{{ homebrew_user }}"
+  environment:
+    PATH: "{{ homebrew_brew_bin_path }}:{{ ansible_env.PATH }}"

@@ -27,3 +27,7 @@ homebrew_brewfile_dir: '~'
 homebrew_clear_cache: false
 
 homebrew_folders_additional: []
+
+# install without root? i.e. as user
+# this requires homebrew_prefix and homebrew_cask_appdir to be in user's home dir
+homebrew_noroot: false
